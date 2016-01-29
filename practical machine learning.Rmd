@@ -1,0 +1,152 @@
+---
+title: "Practical Machine Learning - Final Project"
+author: "San-He Wu"
+date: "January 22, 2016"
+output: html_document
+---
+
+# Project Background (From Coursera)
+
+Using devices such as $Jawbone Up, Nike FuelBand$, and $Fitbit$ it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Data 
+
+The training data for this project are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+## In this project 
+
+The goal of this project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. A report is created describing how I built the model, how I used cross validation, how I think the expected out of sample error is, and why I made the choices I did.
+
+
+# Analysis Summary
+
+In this project, I used basically three methods to train this dataset: Random Forest, boosting random forest and decision tree. The results showed that random forest outran the decision tree on decision tree. 
+
+```{r, warning = FALSE, message = FALSE}
+library(xlsx)
+library(rpart)
+library(caret)
+library(randomForest)
+library(rpart.plot)
+library(RColorBrewer)
+library(rattle)
+library(magrittr)
+
+trainurl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testurl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+### If you do not have the data in your repository, then do the following code.
+# training <- read.csv(url(trainurl))
+# testing <- read.csv(url(testurl))
+###
+
+training <- read.csv("pml-training.csv")
+testing <- read.csv("pml-testing.csv")
+```
+
+## Getting and cleaning the Data
+
+I used the links professors provided to get the data I need in this analysis. First of all, I tried to clean the data. Because there are many NAs in the data, I selected them out and discarded them. In addition, the first eight columns are useless in analysis because they do not have any contribution to there performance. Then, I used `nearZerovar` to further kicked out the variables which contribute less in the data.
+
+```{r}
+nade <- apply(training, 2, function(x) which(is.na(x)) %>% length) %>% as.vector
+training <- training[, -which(nade == 19216)]
+testing <- testing[, -which(nade == 19216)]
+training <- training[, 9:ncol(training)]
+testing <- testing[, 9:ncol(testing)]
+rz <- nearZeroVar(training, saveMetrics = T)
+rz <- which(rz[, 4] == "TRUE") 
+training <- training[, -rz]
+testing <- testing[, -rz]
+set.seed(080604)
+intrain <- createDataPartition(y = training$classe, p = 0.6, list = FALSE)
+intraining <- training[intrain,] 
+intesting <- training[-intrain,]  
+
+```
+
+## Principle Component Analysis
+
+```{r}
+pc <- preProcess(intraining[, -ncol(intraining)], method = "pca", pcaComp = 2, thresh = 0.95)
+intrainPC <- predict(pc, intraining[, -ncol(intraining)])
+modelFit <- train(intraining$classe ~ .,method = "rpart", data = intrainPC)
+testpc <- predict(pc, intraining[, -ncol(intraining)])
+confusionMatrix(intraining$classe, predict(modelFit, testpc))
+
+```
+
+From the results of PCA, it can seen that the accuracy is not in a way acceptable, therefore, maybe it because the `rpart` mnethod is not suitable in this data set. So, I used decision tree to directly train the model.
+
+## Decision Tree
+
+```{r}
+set.seed(080604)
+fit1 <- train(classe ~ ., data = intraining, method = "rpart")
+fancyRpartPlot(fit1$finalModel)
+pred1 <- predict(fit1, newdata = intesting) %>% confusionMatrix(., intesting$classe) ; acc1 <- pred1$overall[1] ; acc1
+
+fit11 <- rpart(classe ~ ., data = intraining, method = "class")
+fancyRpartPlot(fit1$finalModel)
+pred2 <- predict(fit1, newdata = intesting) %>% confusionMatrix(., intesting$classe) ; acc2 <- pred2$overall[1] ; acc2
+
+fit12 <- train(classe ~ ., data = intraining, method = "rpart", trControl = trainControl(method = "cv", number = 3))
+pred3 <- predict(fit12, newdata = intesting) %>% confusionMatrix(., intesting$classe) ; acc3 <- pred3$overall[1] ; acc3
+
+```
+
+I used decision tree to train the model. Cross validation was carryied out by setting $number = 3$. However, the accuracy in decision tree is extremely low. Therefore, decision tree may not considered a good way in predicting the performance given the data set. Therefore, I tried to use another algorithm to train my model.
+
+## Random Forest
+
+```{r}
+set.seed(080604)
+fit2 <- train(classe ~ ., data = intraining, method = "rf", prox = TRUE)
+pred4 <- predict(fit2, newdata = intesting) %>% confusionMatrix(., intesting$classe) ; acc4 <- pred4$overall[1] ; acc4
+
+fit21 <- randomForest(classe ~ ., data = intraining, type = "class")
+pred5 <- predict(fit21, newdata = intesting) %>% confusionMatrix(., intesting$classe) ; acc5 <- pred5$overall[1] ; acc5
+
+fit22 <- train(classe ~ ., data = intraining, method = "rf", prox =
+                 TRUE, trControl = trainControl(method = "cv", number = 3))
+pred6 <- predict(fit22, newdata = intesting) %>% confusionMatrix(., intesting$classe) ; acc6 <- pred6$overall[1] ; acc6
+
+```
+
+In this part, I used random forest to train the dataset. Without exception, the cross validation was also conducted. Fortunately, in this algorithm I already got an quite high accuracy. Hence, this result may be used for the rest quiz of 20 test.
+
+## Boosting
+
+```{r}
+gbm <- train(classe ~ ., method = "gbm", data = intraining, verbose = F)
+pred7 <- predict(gbm, newdata = intesting) %>% confusionMatrix(., intesting$classe) ; pred7$overall[1]
+print(gbm)
+plot(gbm)
+```
+
+In this part I used boosting random forest to train the model. Getting the accuracy is quite high, I think this traning is good enough. Although random forest is already accurate enough.
+
+## Out of Sample Error
+
+```{r}
+data.frame(rf1 = 1 - acc4, rf2 = 1 - acc5, rf3 = 1 - acc6)
+```
+
+In this part, I showed the out of sample error, but limited only in the algorithm random forest. From the results, it is obvious that the sample error is quite low, which shows that the training is basically correct.
+
+## Conclusion
+
+In this project, I used PCA, decision tree, random forest nad boosting methods to train this data set. From the result, it can be seen that the accuracy is most highest if random forest is used. But the drawback is that random forest took too much time to finish the trainig process. Perhaps the training data set can be subgrouped again in order to speed up the training process. Not but the least, the accuracy of random forest is quite high, almost 100% (can be seen from the sample error). Hence in this data set, we may conclude that random forest is the best fitted model, although we still need to aware of the possibility of overfitting. 
+
+## Prediction of Quiz
+
+```{r}
+print(predict(fit21, newdata = testing, type = "class"))
+  
+```
+
+Because there are still another testing data set, so this part is the predicting result of the quiz.
